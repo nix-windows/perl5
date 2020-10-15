@@ -1667,8 +1667,8 @@ https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_re
 Renamed to avoid conflicts, apparently some SDKs define this
 structure.
 
-Hoisted the symlink data into a new type to allow us to make a pointer
-to it, and to avoid C++ scoping issues.
+Hoisted the symlink and mount point data into a new type to allow us
+to make a pointer to it, and to avoid C++ scoping issues.
 
 */
 
@@ -1682,18 +1682,20 @@ typedef struct {
 } MY_SYMLINK_REPARSE_BUFFER, *PMY_SYMLINK_REPARSE_BUFFER;
 
 typedef struct {
+    USHORT SubstituteNameOffset;
+    USHORT SubstituteNameLength;
+    USHORT PrintNameOffset;
+    USHORT PrintNameLength;
+    WCHAR  PathBuffer[MAX_PATH*3];
+} MY_MOUNT_POINT_REPARSE_BUFFER;
+
+typedef struct {
   ULONG  ReparseTag;
   USHORT ReparseDataLength;
   USHORT Reserved;
   union {
     MY_SYMLINK_REPARSE_BUFFER SymbolicLinkReparseBuffer;
-    struct {
-      USHORT SubstituteNameOffset;
-      USHORT SubstituteNameLength;
-      USHORT PrintNameOffset;
-      USHORT PrintNameLength;
-      WCHAR  PathBuffer[1];
-    } MountPointReparseBuffer;
+    MY_MOUNT_POINT_REPARSE_BUFFER MountPointReparseBuffer;
     struct {
       UCHAR DataBuffer[1];
     } GenericReparseBuffer;
@@ -1712,7 +1714,8 @@ is_symlink(HANDLE h) {
     }
 
     if (linkdata_returned < offsetof(MY_REPARSE_DATA_BUFFER, Data.SymbolicLinkReparseBuffer.PathBuffer)
-        || linkdata.ReparseTag != IO_REPARSE_TAG_SYMLINK) {
+        || (linkdata.ReparseTag != IO_REPARSE_TAG_SYMLINK
+            && linkdata.ReparseTag != IO_REPARSE_TAG_MOUNT_POINT)) {
         /* some other type of reparse point */
         return FALSE;
     }
@@ -1738,8 +1741,6 @@ is_symlink_name(const char *name) {
 DllExport int
 win32_readlink(const char *pathname, char *buf, size_t bufsiz) {
     MY_REPARSE_DATA_BUFFER linkdata;
-    const MY_SYMLINK_REPARSE_BUFFER * const sd =
-        &linkdata.Data.SymbolicLinkReparseBuffer;
     HANDLE hlink;
     DWORD fileattr = GetFileAttributes(pathname);
     DWORD linkdata_returned;
@@ -1772,16 +1773,43 @@ win32_readlink(const char *pathname, char *buf, size_t bufsiz) {
     }
     CloseHandle(hlink);
 
-    if (linkdata_returned < offsetof(MY_REPARSE_DATA_BUFFER, Data.SymbolicLinkReparseBuffer.PathBuffer)
-        || linkdata.ReparseTag != IO_REPARSE_TAG_SYMLINK) {
+    switch (linkdata.ReparseTag) {
+    case IO_REPARSE_TAG_SYMLINK:
+        {
+            const MY_SYMLINK_REPARSE_BUFFER * const sd =
+                &linkdata.Data.SymbolicLinkReparseBuffer;
+            if (linkdata_returned < offsetof(MY_REPARSE_DATA_BUFFER, Data.SymbolicLinkReparseBuffer.PathBuffer)) {
+                errno = EINVAL;
+                return -1;
+            }
+            bytes_out =
+                WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS,
+                                    sd->PathBuffer + sd->SubstituteNameOffset/2,
+                                    sd->SubstituteNameLength/2,
+                                    buf, (int)bufsiz, NULL, &used_default);
+        }
+        break;
+    case IO_REPARSE_TAG_MOUNT_POINT:
+        {
+            const MY_MOUNT_POINT_REPARSE_BUFFER * const rd =
+                &linkdata.Data.MountPointReparseBuffer;
+            if (linkdata_returned < offsetof(MY_REPARSE_DATA_BUFFER, Data.MountPointReparseBuffer.PathBuffer)) {
+                errno = EINVAL;
+                return -1;
+            }
+            bytes_out =
+                WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS,
+                                    rd->PathBuffer + rd->SubstituteNameOffset/2,
+                                    rd->SubstituteNameLength/2,
+                                    buf, (int)bufsiz, NULL, &used_default);
+        }
+        break;
+
+    default:
         errno = EINVAL;
         return -1;
     }
 
-    bytes_out = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS,
-                                    sd->PathBuffer+sd->SubstituteNameOffset/2,
-                                    sd->SubstituteNameLength/2,
-                                    buf, bufsiz, NULL, &used_default);
     if (bytes_out == 0 || used_default) {
         /* failed conversion from unicode to ANSI or otherwise failed */
         errno = EINVAL;
