@@ -3450,11 +3450,19 @@ win32_symlink(const char *oldfile, const char *newfile)
     pCreateSymbolicLinkA_t pCreateSymbolicLinkA =
         (pCreateSymbolicLinkA_t)GetProcAddress(GetModuleHandle("kernel32.dll"), "CreateSymbolicLinkA");
     DWORD dest_attr;
-    DWORD create_flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
+    DWORD create_flags = 0;
 
     if (!pCreateSymbolicLinkA) {
         errno = ENOSYS;
         return -1;
+    }
+
+    /* this flag can be used only on Windows 10 1703 or newer */
+    if (g_osver.dwMajorVersion > 10 ||
+        (g_osver.dwMajorVersion == 10 &&
+         (g_osver.dwMinorVersion > 0 || g_osver.dwBuildNumber > 15063)))
+    {
+        create_flags |= SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE;
     }
 
     /* oldfile might be relative and we don't want to change that,
