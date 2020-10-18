@@ -6,6 +6,7 @@ use warnings;
 use warnings FATAL => 'all';
 use Data::Dumper;
 $Data::Dumper::Useqq= 1;
+    $Data::Dumper::Sortkeys=1;
 
 sub DEBUG () { 0 }
 $|=1 if DEBUG;
@@ -366,6 +367,7 @@ my %n2a;    # Inversion of a2n, for each character set
 sub new {
     my $class= shift;
     my %opt= @_;
+    my %hash_return;
     for ( qw(op txt) ) {
         die "in " . __PACKAGE__ . " constructor '$_;' is a mandatory field"
           if !exists $opt{$_};
@@ -388,6 +390,7 @@ sub new {
 
     foreach my $txt ( @{ $opt{txt} } ) {
         my $str= $txt;
+        #print STDERR __LINE__, Dumper $str;
         if ( $str =~ /^[""]/ ) {
             $str= eval $str;
         } elsif ($str =~ / - /x ) { # A range:  Replace this element on the
@@ -437,19 +440,32 @@ sub new {
             die "eval '$1' failed: $@" if $@;
             push @{$opt{txt}}, @results;
             next;
+        } elsif ($str =~ / ^ % \s* ( .* ) /x) { # user-furnished sub() call
+            %hash_return = eval "$1";
+            die "eval '$1' failed: $@" if $@;
+            push @{$opt{txt}}, keys %hash_return;
+            die "Only one multi character expansion currently allowed per rule"
+                                                        if  $self->{multi_maps};
+            next;
         } else {
             die "Unparsable line: $txt\n";
         }
         my ( $cp, $cp_high, $low, $latin1, $utf8 )
                                         = __uni_latin1($charset, $a2n, $str );
+        my $from;
+        if (defined $hash_return{"\"$str\""}) {
+            $from = $hash_return{"\"$str\""};
+            $from = $a2n->[$from] if $from < 256;
+        }
+        #print STDERR __LINE__, Dumper $str, $from; #, \%hash_return;
         my $UTF8= $low   || $utf8;
         my $LATIN1= $low || $latin1;
         my $high = (scalar grep { $_ < 256 } @$cp) ? 0 : $utf8;
         #die Dumper($txt,$cp,$low,$latin1,$utf8)
         #    if $txt=~/NEL/ or $utf8 and @$utf8>3;
 
-        @{ $self->{strs}{$str} }{qw( str txt low utf8 latin1 high cp cp_high UTF8 LATIN1 )}=
-          ( $str, $txt, $low, $utf8, $latin1, $high, $cp, $cp_high, $UTF8, $LATIN1 );
+        @{ $self->{strs}{$str} }{qw( str txt low utf8 latin1 high cp cp_high UTF8 LATIN1 from )}=
+          ( $str, $txt, $low, $utf8, $latin1, $high, $cp, $cp_high, $UTF8, $LATIN1, $from );
         my $rec= $self->{strs}{$str};
         foreach my $key ( qw(low utf8 latin1 high cp cp_high UTF8 LATIN1) ) {
             $self->{size}{$key}{ 0 + @{ $self->{strs}{$str}{$key} } }++
@@ -462,6 +478,7 @@ sub new {
     }
     $self->{n2a} = $n2a{$charset};
     $self->{count}= 0 + keys %{ $self->{strs} };
+    #print STDERR __LINE__, Dumper $self;
     return $self;
 }
 
@@ -523,11 +540,12 @@ sub _optree {
     my ( $self, $trie, $test_type, $ret_type, $else, $depth )= @_;
     return unless defined $trie;
     if ( $self->{has_multi} and $ret_type =~ /cp|both/ ) {
-        die "Can't do 'cp' optree from multi-codepoint strings";
+        #die "Can't do 'cp' optree from multi-codepoint strings";
     }
     $ret_type ||= 'len';
     $else= 0  unless defined $else;
     $depth= 0 unless defined $depth;
+    #print STDERR __LINE__, Dumper $self;
 
     # if we have an empty string as a key it means we are in an
     # accepting state and unless we can match further on should
@@ -535,13 +553,17 @@ sub _optree {
     if (exists $trie->{''} ) {
         # we can now update the "else" value, anything failing to match
         # after this point should return the value from this.
+        my $prefix = $self->{strs}{ $trie->{''} };
         if ( $ret_type eq 'cp' ) {
-            $else= $self->{strs}{ $trie->{''} }{cp}[0];
+            #print STDERR __LINE__, Dumper $prefix;
+            $else= $prefix->{from};
+            $else= $self->{strs}{ $trie->{''} }{cp}[0] unless defined $else;
             $else= $self->val_fmt($else) if $else > 9;
         } elsif ( $ret_type eq 'len' ) {
             $else= $depth;
         } elsif ( $ret_type eq 'both') {
-            $else= $self->{strs}{ $trie->{''} }{cp}[0];
+            $else= $prefix->{from};
+            $else= $self->{strs}{ $trie->{''} }{cp}[0] unless defined $else;
             $else= $self->val_fmt($else) if $else > 9;
             $else= "len=$depth, $else";
         }
@@ -1661,36 +1683,36 @@ QUOTEMETA: Meta-characters that \Q should quote
 \p{_Perl_Quotemeta}
 
 MULTI_CHAR_FOLD: multi-char strings that are folded to by a single character
-=> UTF8 :safe
-&regcharclass_multi_char_folds::multi_char_folds('u', 'a')
+=> UTF8 UTF8-cp :safe
+%regcharclass_multi_char_folds::multi_char_folds('u', 'a')
 
 MULTI_CHAR_FOLD: multi-char strings that are folded to by a single character
-=> LATIN1 : safe
-&regcharclass_multi_char_folds::multi_char_folds('l', 'a')
+=> LATIN1 LATIN1-cp : safe
+%regcharclass_multi_char_folds::multi_char_folds('l', 'a')
 
 THREE_CHAR_FOLD: A three-character multi-char fold
 => UTF8 :safe
-&regcharclass_multi_char_folds::multi_char_folds('u', '3')
+%regcharclass_multi_char_folds::multi_char_folds('u', '3')
 
 THREE_CHAR_FOLD: A three-character multi-char fold
 => LATIN1 :safe
-&regcharclass_multi_char_folds::multi_char_folds('l', '3')
+%regcharclass_multi_char_folds::multi_char_folds('l', '3')
 
 THREE_CHAR_FOLD_HEAD: The first two of three-character multi-char folds
 => UTF8 :safe
-&regcharclass_multi_char_folds::multi_char_folds('u', 'h')
+%regcharclass_multi_char_folds::multi_char_folds('u', 'h')
 
 THREE_CHAR_FOLD_HEAD: The first two of three-character multi-char folds
 => LATIN1 :safe
-&regcharclass_multi_char_folds::multi_char_folds('l', 'h')
+%regcharclass_multi_char_folds::multi_char_folds('l', 'h')
 #
 #THREE_CHAR_FOLD_NON_FINAL: The first or middle character of multi-char folds
 #=> UTF8 :safe
-#&regcharclass_multi_char_folds::multi_char_folds('u', 'fm')
+#%regcharclass_multi_char_folds::multi_char_folds('u', 'fm')
 #
 #THREE_CHAR_FOLD_NON_FINAL: The first or middle character of multi-char folds
 #=> LATIN1 :safe
-#&regcharclass_multi_char_folds::multi_char_folds('l', 'fm')
+#%regcharclass_multi_char_folds::multi_char_folds('l', 'fm')
 
 FOLDS_TO_MULTI: characters that fold to multi-char strings
 => UTF8 :fast

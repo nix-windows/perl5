@@ -708,6 +708,28 @@ typedef struct {
 #  define MAX_RECURSE_EVAL_NOCHANGE_DEPTH 10
 #endif
 
+#define MAX_MATCHES (MAX_FOLD_FROMS + 10)
+struct next_matchable_info {
+    U8     matches[MAX_MATCHES][UTF8_MAXBYTES+1];
+    U8     first_byte_mask;
+    U8     first_byte_anded;
+    U32    mask32;
+    U32    anded32;
+#if 0
+    PERL_UINT_FAST8_T lengths[MAX_MATCHES];
+    PERL_INT_FAST8_T count; /* Negative means not initialized */
+    PERL_UINT_FAST8_T min_length;
+    PERL_UINT_FAST8_T max_length;
+    PERL_UINT_FAST8_T mask_initial_FFs;
+#else
+    U8 lengths[MAX_MATCHES];
+    I8 count; /* Negative means not initialized */
+    U8 min_length;
+    U8 max_length;
+    U8 mask_initial_FFs;
+#endif
+};
+
 typedef I32 CHECKPOINT;
 
 typedef struct regmatch_state {
@@ -856,7 +878,6 @@ typedef struct regmatch_state {
 	struct {
 	    /* this first element must match u.yes */
 	    struct regmatch_state *prev_yes_state;
-	    int c1, c2;		/* case fold search */
 	    CHECKPOINT cp;
 	    U32 lastparen;
 	    U32 lastcloseparen;
@@ -865,8 +886,7 @@ typedef struct regmatch_state {
 	    bool minmod;
 	    regnode *A, *B;	/* the nodes corresponding to /A*B/  */
 	    regnode *me;	/* the curlym node */
-            U8 c1_utf8[UTF8_MAXBYTES+1];  /* */
-            U8 c2_utf8[UTF8_MAXBYTES+1];
+            struct next_matchable_info Binfo;
 	} curlym;
 
 	struct {
@@ -874,14 +894,12 @@ typedef struct regmatch_state {
 	    CHECKPOINT cp;
 	    U32 lastparen;
 	    U32 lastcloseparen;
-	    int c1, c2;		/* case fold search */
 	    char *maxpos;	/* highest possible point in string to match */
 	    char *oldloc;	/* the previous locinput */
 	    int count;
 	    int min, max;	/* {m,n} */
 	    regnode *A, *B;	/* the nodes corresponding to /A*B/  */
-            U8 c1_utf8[UTF8_MAXBYTES+1];  /* */
-            U8 c2_utf8[UTF8_MAXBYTES+1];
+            struct next_matchable_info Binfo;
 	} curly; /* and CURLYN/PLUS/STAR */
 
     } u;
