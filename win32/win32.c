@@ -2284,7 +2284,6 @@ win32_utime(const char *filename, struct utimbuf *times)
 {
     dTHX;
     HANDLE handle;
-    FILETIME ftCreate;
     FILETIME ftAccess;
     FILETIME ftWrite;
     struct utimbuf TimeBuffer;
@@ -2293,7 +2292,7 @@ win32_utime(const char *filename, struct utimbuf *times)
     filename = PerlDir_mapA(filename);
     /* This will (and should) still fail on readonly files */
     handle = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE,
-                         FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
                          OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (handle == INVALID_HANDLE_VALUE) {
         translate_to_errno();
@@ -2307,10 +2306,16 @@ win32_utime(const char *filename, struct utimbuf *times)
     }
 
     if (filetime_from_time(&ftAccess, times->actime) &&
-	filetime_from_time(&ftWrite, times->modtime) &&
-	SetFileTime(handle, &ftCreate, &ftAccess, &ftWrite))
-    {
-	rc = 0;
+	filetime_from_time(&ftWrite, times->modtime)) {
+        if (SetFileTime(handle, NULL, &ftAccess, &ftWrite)) {
+            rc = 0;
+        }
+        else {
+            translate_to_errno();
+        }
+    }
+    else {
+        errno = EINVAL; /* bad time? */
     }
 
     CloseHandle(handle);
