@@ -751,7 +751,7 @@ struct w32_stat {
     Dev_t st_dev;
     Ino_t st_ino;
     unsigned short st_mode;
-    short st_nlink;
+    DWORD st_nlink;
     short st_uid;
     short st_gid;
     Dev_t st_rdev;
