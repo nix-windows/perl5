@@ -1834,7 +1834,7 @@ win32_readlink(const char *pathname, char *buf, size_t bufsiz) {
         errno = EINVAL;
         return -1;
     }
-    if (bytes_out > bufsiz) {
+    if ((size_t)bytes_out > bufsiz) {
         errno = EINVAL;
         return -1;
     }
