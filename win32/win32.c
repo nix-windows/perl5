@@ -1521,7 +1521,12 @@ win32_stat_low(HANDLE handle, const char *path, STRLEN len, Stat_t *sbuf) {
             sbuf->st_size |= bhi.nFileSizeLow;
 #else
             if (bhi.nFileSizeHigh) {
+#  ifdef EOVERFLOW
                 errno = EOVERFLOW;
+#  else
+                errno = EINVAL;
+#  endif
+
                 return -1;
             }
             sbuf->st_size = bhi.nFileSizeLow;
