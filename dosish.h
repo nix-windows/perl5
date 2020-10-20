@@ -70,10 +70,14 @@
  *	to include <sys/stat.h> and <sys/types.h> to get any typedef'ed
  *	information.
  */
-#if defined(WIN64) || defined(USE_LARGE_FILES)
+#if defined(WIN32) || defined(USE_LARGE_FILES)
 #  define Stat_t struct w32_stat
 #else
-#  define Stat_t struct stat
+#  ifdef USE_LARGE_FILES
+#    define Stat_t struct _stati64
+#  else
+#    define Stat_t struct stat
+#  endif
 #endif
 
 /* USE_STAT_RDEV:
